@@ -1460,6 +1460,68 @@
     return allRows.filter(function (r) { return passesFilters(r, tokens, groupVal, favOnly); });
   }
 
+  // ---------- Fuzzy fallback ----------
+  // When the exact search finds nothing (a typo, or voice search mis-hearing a word),
+  // look for the closest matches instead of just saying "not found".
+  function levenshtein(a, b) {
+    if (a === b) return 0;
+    const al = a.length, bl = b.length;
+    if (!al) return bl;
+    if (!bl) return al;
+    let prev = new Array(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+    for (let i = 1; i <= al; i++) {
+      const cur = [i];
+      for (let j = 1; j <= bl; j++) {
+        const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+        cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+      }
+      prev = cur;
+    }
+    return prev[bl];
+  }
+  function fuzzyThreshold(len) {
+    if (len <= 3) return 0;   // too short to safely fuzz
+    if (len <= 6) return 1;
+    return 2;
+  }
+  // Smallest edit distance between `token` and any word of the row (or -1 if none
+  // of them are close enough to count as a match for this token).
+  function tokenFuzzyDistance(words, token) {
+    const th = fuzzyThreshold(token.length);
+    let best = Infinity;
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (!w) continue;
+      if (w.indexOf(token) !== -1 || token.indexOf(w) !== -1) { best = 0; break; }
+      const d = levenshtein(w, token);
+      if (d < best) best = d;
+    }
+    return best <= th ? best : -1;
+  }
+  // Same "every token must match" rule as the exact search, but each token may match
+  // approximately; results are ranked by total closeness (closest first).
+  function getFuzzyRows(tokens, groupVal, favOnly) {
+    const base = allRows.filter(function (r) {
+      if (groupVal && r.group !== groupVal) return false;
+      if (favOnly && !isFavoriteCode(r.code)) return false;
+      return true;
+    });
+    const scored = [];
+    base.forEach(function (r) {
+      const words = (r.normDesc + ' ' + r.normCode).split(' ');
+      let total = 0, ok = true;
+      for (let i = 0; i < tokens.length; i++) {
+        const d = tokenFuzzyDistance(words, tokens[i]);
+        if (d === -1) { ok = false; break; }
+        total += d;
+      }
+      if (ok) scored.push({ row: r, dist: total });
+    });
+    scored.sort(function (a, b) { return a.dist - b.dist; });
+    return scored.map(function (s) { return s.row; });
+  }
+
   function runSearch() {
     const raw = searchInput.value || '';
     const tokens = normalize(raw).split(' ').filter(Boolean);
@@ -1471,7 +1533,12 @@
       return;
     }
 
-    const filtered = getFilteredRows();
+    let filtered = getFilteredRows();
+    let isFuzzy = false;
+    if (!filtered.length && tokens.length) {
+      const fuzzyRows = getFuzzyRows(tokens, groupVal, favOnly);
+      if (fuzzyRows.length) { filtered = fuzzyRows; isFuzzy = true; }
+    }
     const totalCount = filtered.length;
     const matches = filtered.slice(0, MAX_RESULTS);
     const capped = totalCount > MAX_RESULTS;
@@ -1483,12 +1550,13 @@
     }
 
     resultsMeta.style.display = 'flex';
-    resultsMeta.innerHTML = '<span>' + totalCount.toLocaleString('fa-IR') +
-      (hasActiveFilter ? ' نتیجه یافت شد' : ' کالا موجود است') +
+    resultsMeta.innerHTML = '<span>' +
+      (isFuzzy ? '🔍 نتیجه‌ی دقیق پیدا نشد؛ ' + totalCount.toLocaleString('fa-IR') + ' مورد مشابه نمایش داده می‌شود' :
+        totalCount.toLocaleString('fa-IR') + (hasActiveFilter ? ' نتیجه یافت شد' : ' کالا موجود است')) +
       (capped ? ' (فقط ' + MAX_RESULTS + ' مورد اول نمایش داده می‌شود؛ برای نتایج دقیق‌تر عبارت را کامل‌تر بنویسید)' : '') +
       '</span>';
 
-    renderTable(matches, tokens);
+    renderTable(matches, isFuzzy ? [] : tokens);
   }
 
   searchInput.addEventListener('input', function () {
