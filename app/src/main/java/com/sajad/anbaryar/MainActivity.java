@@ -10,6 +10,9 @@ import android.os.Environment;
 import android.print.PrintAttributes;
 import android.print.PrintManager;
 import android.provider.MediaStore;
+import android.speech.RecognizerIntent;
+import org.json.JSONObject;
+import java.util.ArrayList;
 import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
@@ -31,6 +34,7 @@ import java.io.OutputStream;
 public class MainActivity extends Activity {
     private static final String HOME = "https://appassets.androidplatform.net/assets/index.html";
     private static final int REQ_FILE = 1;
+    private static final int REQ_VOICE = 2;
 
     /** Injected after every page load: catches blob-URL downloads (the web app's Excel/CSV/PNG
      *  export buttons use <a download> + URL.createObjectURL) and routes them through the
@@ -137,6 +141,16 @@ public class MainActivity extends Activity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode == REQ_VOICE) {
+            if (resultCode == RESULT_OK && data != null) {
+                ArrayList<String> r = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS);
+                String text = (r != null && !r.isEmpty()) ? r.get(0) : "";
+                web.evaluateJavascript("window.abVoice&&window.abVoice(" + JSONObject.quote(text) + ")", null);
+            } else {
+                web.evaluateJavascript("window.abVoice&&window.abVoice('')", null);
+            }
+            return;
+        }
         if (requestCode != REQ_FILE || fileCallback == null) return;
         Uri[] result = null;
         if (resultCode == RESULT_OK && data != null) {
@@ -211,6 +225,25 @@ public class MainActivity extends Activity {
             } catch (Exception e) {
                 return false;
             }
+        }
+
+        /** Opens Google's native Persian speech input; the recognized text comes back
+         *  through window.abVoice() and fills the search box. */
+        @JavascriptInterface
+        public void startVoice() {
+            runOnUiThread(() -> {
+                Intent i = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
+                i.putExtra(RecognizerIntent.EXTRA_LANGUAGE, "fa-IR");
+                i.putExtra(RecognizerIntent.EXTRA_PROMPT, "نام کالا را بگویید");
+                try {
+                    startActivityForResult(i, REQ_VOICE);
+                } catch (Exception e) {
+                    web.evaluateJavascript("window.abVoice&&window.abVoice('')", null);
+                    android.widget.Toast.makeText(MainActivity.this,
+                        "برنامه تشخیص گفتار گوگل روی گوشی نیست", android.widget.Toast.LENGTH_LONG).show();
+                }
+            });
         }
 
         /** Opens Android's native print dialog on the current page — used for the حواله

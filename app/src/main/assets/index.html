@@ -714,6 +714,33 @@
     background: var(--surface);
     box-shadow: var(--shadow-inset), 0 0 0 3px rgba(15,98,254,0.14);
   }
+  #searchMicBtn {
+    position: absolute;
+    left: 10px;
+    top: 14px;
+    width: 32px;
+    height: 32px;
+    border: none;
+    border-radius: 50%;
+    background: var(--surface-2);
+    color: var(--text);
+    font-size: 1rem;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease, transform 0.15s ease;
+  }
+  #searchMicBtn:active { transform: scale(0.92); }
+  #searchMicBtn.listening {
+    background: #e23d3d;
+    color: #fff;
+    animation: micPulse 1s ease-in-out infinite;
+  }
+  @keyframes micPulse {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(226,61,61,0.45); }
+    50% { box-shadow: 0 0 0 8px rgba(226,61,61,0); }
+  }
 
   .hint {
     font-size: 0.78rem;
@@ -873,7 +900,8 @@
     </div>
 
     <div class="card search-box">
-      <input type="text" id="searchInput" placeholder="جستجو کنید... مثلاً: کابل آلومینیوم 120" autocomplete="off">
+      <input type="text" id="searchInput" placeholder="جستجو کنید... مثلاً: کابل آلومینیوم 120" autocomplete="off" style="padding-left:44px;">
+      <button type="button" id="searchMicBtn" title="جستجوی صوتی" aria-label="جستجوی صوتی">🎤</button>
       <div class="hint">می‌توانید چند کلمه را با فاصله وارد کنید؛ فقط ردیف‌هایی نشان داده می‌شود که همه‌ی کلمات را داشته باشند. ردیف‌های با کد هفت‌رقمی به رنگ قرمز نمایش داده می‌شوند و نباید استفاده شوند.</div>
       <div style="display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; align-items:center;">
         <select id="groupFilterSelect" style="padding:9px 10px; border-radius:8px; border:1px solid var(--border); background:var(--surface-2); color:var(--text); font-family:inherit; font-size:0.85rem; flex:1; min-width:160px;">
@@ -1022,6 +1050,7 @@
   const clearBtn = document.getElementById('clearBtn');
   const dataInfo = document.getElementById('dataInfo');
   const searchInput = document.getElementById('searchInput');
+  const searchMicBtn = document.getElementById('searchMicBtn');
   const resultsMeta = document.getElementById('resultsMeta');
   const resultsContainer = document.getElementById('resultsContainer');
   const themeToggle = document.getElementById('themeToggle');
@@ -1399,6 +1428,45 @@
     clearTimeout(searchTimer);
     searchTimer = setTimeout(runSearch, 120);
   });
+
+  // ---------- voice search ----------
+  // Inside the Android app, AndroidBridge.startVoice() opens Google's native speech
+  // recognizer and the result comes back through window.abVoice(). In a regular
+  // browser (or the published artifact), the Web Speech API is used directly.
+  let webSpeechRec = null;
+  window.abVoice = function (text) {
+    if (searchMicBtn) searchMicBtn.classList.remove('listening');
+    if (typeof text === 'string' && text) {
+      searchInput.value = text;
+      runSearch();
+    }
+  };
+  function startVoiceSearch() {
+    if (window.AndroidBridge && typeof window.AndroidBridge.startVoice === 'function') {
+      searchMicBtn.classList.add('listening');
+      window.AndroidBridge.startVoice();
+      return;
+    }
+    const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!SR) {
+      appAlert('جستجوی صوتی در این مرورگر پشتیبانی نمی‌شود.');
+      return;
+    }
+    if (webSpeechRec) { try { webSpeechRec.stop(); } catch (e) { } }
+    webSpeechRec = new SR();
+    webSpeechRec.lang = 'fa-IR';
+    webSpeechRec.interimResults = false;
+    webSpeechRec.maxAlternatives = 1;
+    searchMicBtn.classList.add('listening');
+    webSpeechRec.onresult = function (e) {
+      const text = e.results && e.results[0] && e.results[0][0] ? e.results[0][0].transcript : '';
+      window.abVoice(text);
+    };
+    webSpeechRec.onerror = function () { searchMicBtn.classList.remove('listening'); };
+    webSpeechRec.onend = function () { searchMicBtn.classList.remove('listening'); };
+    try { webSpeechRec.start(); } catch (e) { searchMicBtn.classList.remove('listening'); }
+  }
+  if (searchMicBtn) searchMicBtn.addEventListener('click', startVoiceSearch);
 
   // ---------- CSV export ----------
   function csvEscape(v) {
