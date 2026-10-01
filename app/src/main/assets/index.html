@@ -1223,17 +1223,34 @@
       .replace(/[\u064B-\u065F\u0670]/g, '') // diacritics
       .replace(/[۰-۹]/g, function (d) { return '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]; })
       .replace(/[٠-٩]/g, function (d) { return '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]; })
-      .replace(/[×*]/g, 'x')        // × or * (dimension separator) -> x
+      .replace(/×/g, '*')           // × (dimension separator) -> * (the ASCII letter x/X
+                                       // is deliberately left alone: it's part of ordinary
+                                       // words like "BOX" in this catalog, so turning it into
+                                       // the separator made "x"-searches match inside "box")
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+    // the ASCII letter x is only treated as a dimension separator when it sits directly
+    // between two digits (40x40); elsewhere (as in "box") it's left as an ordinary letter.
+    s = s.replace(/([0-9])x([0-9])/g, '$1*$2');
     s = convertPersianNumberWords(s);
-    // spoken ways of saying the "x" between two dimensions (40 در 40 / 40 ضربدر 40 / ...).
+    // spoken ways of saying "*" between two dimensions (40 در 40 / 40 ضربدر 40 / ...).
     // Done word-by-word (not \b regex, which doesn't see Persian letters as word chars)
     // so only the whole word "در" etc. is affected, never a substring of another word.
     const X_WORDS = { 'ضربدر': 1, 'ایکس': 1, 'ستاره': 1, 'در': 1 };
-    s = s.split(' ').map(function (w) { return X_WORDS[w] ? 'x' : w; }).join(' ');
+    s = s.split(' ').map(function (w) { return X_WORDS[w] ? '*' : w; }).join(' ');
     return s.replace(/\s+/g, ' ').trim();
+  }
+
+  // Whole-number-aware match: a purely numeric token like "40" must appear as a complete
+  // number in the haystack (not merely as a substring of "4000" or "140"); any other token
+  // (a word, or something mixed like "40*40") still matches as a plain substring.
+  function tokenMatches(haystack, token) {
+    if (/^[0-9]+$/.test(token)) {
+      const esc = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      return new RegExp('(^|[^0-9])' + esc + '($|[^0-9])').test(haystack);
+    }
+    return haystack.indexOf(token) !== -1;
   }
 
   // ---------- IndexedDB ----------
@@ -1428,7 +1445,7 @@
       let ok = true;
       for (let t = 0; t < tokens.length; t++) {
         const tok = tokens[t];
-        if (r.normDesc.indexOf(tok) === -1 && r.normCode.indexOf(tok) === -1) { ok = false; break; }
+        if (!tokenMatches(r.normDesc, tok) && !tokenMatches(r.normCode, tok)) { ok = false; break; }
       }
       if (!ok) return false;
     }
