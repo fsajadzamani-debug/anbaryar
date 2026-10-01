@@ -1169,9 +1169,51 @@
   initTheme();
 
   // ---------- Persian normalization ----------
+  // Converts spoken/spelled-out Persian numbers ("چهل", "صد و بیست") inside an
+  // already-normalized string into digits, so voice search for "چهل" matches
+  // a stored "40". Only consumes a trailing "و" when it links two number words
+  // (so the everyday word "و" meaning "and" elsewhere is left untouched).
+  const PN_ONES = { 'صفر': 0, 'یک': 1, 'دو': 2, 'سه': 3, 'چهار': 4, 'پنج': 5, 'شش': 6, 'هفت': 7, 'هشت': 8, 'نه': 9 };
+  const PN_TEENS = { 'ده': 10, 'یازده': 11, 'دوازده': 12, 'سیزده': 13, 'چهارده': 14, 'پانزده': 15, 'شانزده': 16, 'هفده': 17, 'هجده': 18, 'نوزده': 19 };
+  const PN_TENS = { 'بیست': 20, 'سی': 30, 'چهل': 40, 'پنجاه': 50, 'شصت': 60, 'هفتاد': 70, 'هشتاد': 80, 'نود': 90 };
+  const PN_HUNDREDS = { 'صد': 100, 'یکصد': 100, 'دویست': 200, 'سیصد': 300, 'چهارصد': 400, 'پانصد': 500, 'ششصد': 600, 'هفتصد': 700, 'هشتصد': 800, 'نهصد': 900 };
+  const PN_WORD_SET = {};
+  [PN_ONES, PN_TEENS, PN_TENS, PN_HUNDREDS].forEach(function (m) { Object.keys(m).forEach(function (k) { PN_WORD_SET[k] = true; }); });
+  function pnWordsToNumber(words) {
+    let total = 0, any = false;
+    for (let i = 0; i < words.length; i++) {
+      const w = words[i];
+      if (PN_HUNDREDS[w] !== undefined) { total += PN_HUNDREDS[w]; any = true; }
+      else if (PN_TENS[w] !== undefined) { total += PN_TENS[w]; any = true; }
+      else if (PN_TEENS[w] !== undefined) { total += PN_TEENS[w]; any = true; }
+      else if (PN_ONES[w] !== undefined) { total += PN_ONES[w]; any = true; }
+    }
+    return any ? total : null;
+  }
+  function convertPersianNumberWords(str) {
+    const tokens = str.split(' ');
+    const out = [];
+    let i = 0;
+    while (i < tokens.length) {
+      if (PN_WORD_SET[tokens[i]]) {
+        const run = [tokens[i]];
+        let j = i + 1;
+        while (j + 1 < tokens.length && tokens[j] === 'و' && PN_WORD_SET[tokens[j + 1]]) {
+          run.push(tokens[j + 1]);
+          j += 2;
+        }
+        const val = pnWordsToNumber(run);
+        if (val !== null) { out.push(String(val)); i = j; continue; }
+      }
+      out.push(tokens[i]);
+      i++;
+    }
+    return out.join(' ');
+  }
+
   function normalize(str) {
     if (str === null || str === undefined) return '';
-    return String(str)
+    let s = String(str)
       .replace(/\u200c/g, ' ')      // zero-width non-joiner -> space
       .replace(/ي/g, 'ی')
       .replace(/ك/g, 'ک')
@@ -1181,9 +1223,17 @@
       .replace(/[\u064B-\u065F\u0670]/g, '') // diacritics
       .replace(/[۰-۹]/g, function (d) { return '0123456789'['۰۱۲۳۴۵۶۷۸۹'.indexOf(d)]; })
       .replace(/[٠-٩]/g, function (d) { return '0123456789'['٠١٢٣٤٥٦٧٨٩'.indexOf(d)]; })
+      .replace(/[×*]/g, 'x')        // × or * (dimension separator) -> x
       .replace(/\s+/g, ' ')
       .trim()
       .toLowerCase();
+    s = convertPersianNumberWords(s);
+    // spoken ways of saying the "x" between two dimensions (40 در 40 / 40 ضربدر 40 / ...).
+    // Done word-by-word (not \b regex, which doesn't see Persian letters as word chars)
+    // so only the whole word "در" etc. is affected, never a substring of another word.
+    const X_WORDS = { 'ضربدر': 1, 'ایکس': 1, 'ستاره': 1, 'در': 1 };
+    s = s.split(' ').map(function (w) { return X_WORDS[w] ? 'x' : w; }).join(' ');
+    return s.replace(/\s+/g, ' ').trim();
   }
 
   // ---------- IndexedDB ----------
