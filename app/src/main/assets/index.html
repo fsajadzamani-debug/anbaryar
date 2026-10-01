@@ -1378,7 +1378,7 @@
       let ok = true;
       for (let t = 0; t < tokens.length; t++) {
         const tok = tokens[t];
-        if (r.normDesc.indexOf(tok) === -1 && r.normCode.indexOf(tok) === -1 && r.normGroup.indexOf(tok) === -1) { ok = false; break; }
+        if (r.normDesc.indexOf(tok) === -1 && r.normCode.indexOf(tok) === -1) { ok = false; break; }
       }
       if (!ok) return false;
     }
